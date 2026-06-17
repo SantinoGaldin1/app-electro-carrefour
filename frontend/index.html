@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Solicitar Asesor - Carrefour Electro</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f4f4f9;
+            text-align: center;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            max-width: 90%;
+            width: 400px;
+        }
+        h1 {
+            color: #003087; /* Azul Carrefour */
+            margin-bottom: 0.5rem;
+        }
+        p {
+            color: #555;
+            margin-bottom: 2rem;
+        }
+        .btn-request {
+            background-color: #ed1c24; /* Rojo Carrefour */
+            color: white;
+            border: none;
+            padding: 1.2rem 2.5rem;
+            font-size: 1.5rem;
+            font-weight: bold;
+            border-radius: 50px;
+            cursor: pointer;
+            transition: transform 0.2s, background-color 0.2s;
+            width: 100%;
+        }
+        .btn-request:active {
+            transform: scale(0.95);
+        }
+        .btn-request:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        #status {
+            margin-top: 1.5rem;
+            font-weight: bold;
+        }
+        .success { color: #28a745; }
+        .error { color: #dc3545; }
+        
+        .logo {
+            width: 150px;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Logo de Carrefour (opcional, podrías usar un placeholder) -->
+        <h1>Electrónica</h1>
+        <p>¿Necesitas ayuda con un producto? Presiona el botón y un asesor vendrá enseguida.</p>
+        
+        <button id="requestBtn" class="btn-request" onclick="solicitarAsesor()">
+            SOLICITAR ASESOR
+        </button>
+
+        <div id="status"></div>
+    </div>
+
+    <script>
+        async function solicitarAsesor() {
+            const btn = document.getElementById('requestBtn');
+            const status = document.getElementById('status');
+
+            // Deshabilitar botón para evitar spam
+            btn.disabled = true;
+            status.innerText = "Enviando solicitud...";
+            status.className = "";
+
+            try {
+                // Cambia esta URL si despliegas el backend
+                const response = await fetch('http://localhost:3000/solicitar', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    status.innerText = "✅ ¡Solicitud enviada! Un asesor se dirige hacia aquí.";
+                    status.className = "success";
+                    
+                    // Reactivar después de 30 segundos
+                    setTimeout(() => {
+                        btn.disabled = false;
+                        status.innerText = "";
+                    }, 30000);
+                } else {
+                    throw new Error(data.message);
+                }
+            } catch (error) {
+                status.innerText = "❌ Error al conectar. Por favor, intenta de nuevo.";
+                status.className = "error";
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
