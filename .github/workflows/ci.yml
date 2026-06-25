@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [dev, master]
+
+jobs:
+  frontend:
+    name: Frontend (build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - run: npm run build
+
+  backend:
+    name: Backend (smoke)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      # ponytail: sin tests unitarios todavia. Smoke test: el server arranca y /ping responde.
+      - name: Smoke test (/ping)
+        run: |
+          node server.js &
+          SERVER_PID=$!
+          sleep 3
+          curl -fsS http://localhost:3000/ping
+          kill $SERVER_PID
