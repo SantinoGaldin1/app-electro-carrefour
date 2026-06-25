@@ -1,6 +1,6 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
+<!doctype html>
+<html lang="en">
+  <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Solicitar Asesor - Carrefour</title>
@@ -20,7 +20,7 @@
         }
 
         body {
-            font-family: 'Open Sans', 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Open Sans', sans-serif;
             background: linear-gradient(135deg, var(--carrefour-blue) 0%, #001a4d 100%);
             height: 100vh;
             display: flex;
@@ -80,17 +80,19 @@
         }
 
         h1 {
-            font-size: 1.8rem;
-            color: var(--carrefour-blue);
-            margin-bottom: 15px;
-            font-weight: 800;
+            font-family: 'Segoe UI', sans-serif;
+            color: var(--carrefour-blue) !important;
+            font-weight: 800 !important;
+            font-size: 1.8rem !important;
+            margin-bottom: 15px !important;
+            white-space: nowrap !important;
         }
 
         p {
-            font-size: 1rem;
+            font-size: 0.9rem;
             color: #666;
             line-height: 1.5;
-            margin-bottom: 30px;
+            margin-bottom: 30px !important;
         }
 
         .btn-request {
@@ -160,6 +162,7 @@
 
         .success { color: #2ecc71; }
         .error { color: var(--carrefour-red); }
+        .info { color: var(--carrefour-blue); }
 
         /* Efecto Confeti sutil al éxito */
         .confetti-piece {
@@ -177,9 +180,8 @@
             h1 { font-size: 1.6rem; }
         }
     </style>
-</head>
-<body>
-
+  </head>
+  <body>
     <div class="card">
         <div class="logo-container">
             <img src="LogoCarrefour.png" alt="Logo Carrefour">
@@ -209,22 +211,37 @@
             status.innerText = "";
             status.classList.remove('show');
 
+            // ponytail: local apunta al backend de tu maquina, en vivo a Render. Sin toggle manual.
+            const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+                ? 'http://localhost:3000'
+                : 'https://carrefour-bot.onrender.com';
+
             try {
-                const response = await fetch('https://carrefour-bot.onrender.com/solicitar', {
+                const response = await fetch(`${API}/solicitar`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
                 });
 
                 const data = await response.json();
 
+                // Cooldown activo: un cliente ya avisó hace poco. No es error, solo esperar.
+                if (response.status === 429) {
+                    loader.style.display = 'none';
+                    btnText.style.display = 'block';
+                    btn.disabled = false;
+                    status.innerText = "⏳ " + data.message;
+                    status.className = "info show";
+                    return;
+                }
+
                 if (data.success) {
                     loader.style.display = 'none';
                     btnText.style.display = 'block';
                     btnText.innerText = "¡En camino!";
-                    
-                    status.innerHTML = "✅ Solicitud enviada.<br>Un asesor se dirige hacia aquí.";
+
+                    status.innerHTML = "✅ Solicitud enviada.<br>Un asesor se dirige hacia aquí, espere en punto de venta";
                     status.className = "success show";
-                    
+
                     // Efecto de vibración suave en el éxito
                     navigator.vibrate?.([100, 30, 100]);
 
@@ -245,5 +262,5 @@
             }
         }
     </script>
-</body>
+  </body>
 </html>
