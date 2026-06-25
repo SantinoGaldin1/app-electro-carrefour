@@ -1,0 +1,11 @@
+.aider*
+
+# Secrets - nunca commitear
+.env
+backend/.env
+
+# Dependencias
+node_modules/
+
+# Temp de Google Drive
+.tmp.driveupload/
