@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const cors = require('cors');
+const path = require('path');
 const { Pool } = require('pg');
 require('dotenv').config();
 
@@ -135,10 +136,38 @@ async function iniciarPolling() {
     }
 }
 
-// Estadisticas rapidas: total, atendidas, no atendidas.
-app.get('/stats', async (req, res) => {
+// Filtro opcional por mes (YYYY-MM). Devuelve [clausula, params] para la query.
+const filtroMes = (mes) =>
+    mes ? ["WHERE to_char(created_at, 'YYYY-MM') = $1", [mes]] : ['', []];
+
+// Años con datos, desde el primer año hasta el actual. El mes (1-12) lo arma el front.
+// En 2027 va a aparecer 2027 solo, dejando 2026 para ver el historial.
+app.get('/stats/anios', async (req, res) => {
     try {
-        const r = await pool.query('SELECT estado, COUNT(*)::int AS n FROM solicitudes GROUP BY estado');
+        const actual = "extract(year FROM now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::int";
+        const r = await pool.query(`
+            SELECT y::int AS anio
+            FROM generate_series(
+                COALESCE((SELECT extract(year FROM min(created_at))::int FROM solicitudes), ${actual}),
+                ${actual}
+            ) y
+            ORDER BY y DESC
+        `);
+        res.json(r.rows.map(row => row.anio));
+    } catch (error) {
+        console.error('Error en /stats/anios:', error.message);
+        res.status(500).json({ error: 'No se pudo leer la base' });
+    }
+});
+
+// Estadisticas rapidas: total, atendidas, no atendidas.
+// Opcional ?mes=YYYY-MM (un mes) o ?anio=YYYY (todo el año, para el resumen anual).
+app.get('/stats', async (req, res) => {
+    let where = '', params = [];
+    if (req.query.anio) { where = 'WHERE extract(year FROM created_at) = $1'; params = [parseInt(req.query.anio)]; }
+    else { [where, params] = filtroMes(req.query.mes); }
+    try {
+        const r = await pool.query(`SELECT estado, COUNT(*)::int AS n FROM solicitudes ${where} GROUP BY estado`, params);
         const c = { atendido: 0, no_atendido: 0 };
         r.rows.forEach(row => { c[row.estado] = row.n; });
         res.json({ total: c.atendido + c.no_atendido, atendidas: c.atendido, no_atendidas: c.no_atendido });
@@ -146,6 +175,58 @@ app.get('/stats', async (req, res) => {
         console.error('Error en /stats:', error.message);
         res.status(500).json({ error: 'No se pudo leer la base' });
     }
+});
+
+// Estadisticas por dia (grafico de barras). Opcional ?mes=YYYY-MM.
+app.get('/stats/por-dia', async (req, res) => {
+    const [where, params] = filtroMes(req.query.mes);
+    try {
+        const r = await pool.query(`
+            SELECT created_at::date AS dia,
+                   COUNT(*) FILTER (WHERE estado = 'atendido')::int    AS atendidas,
+                   COUNT(*) FILTER (WHERE estado = 'no_atendido')::int AS no_atendidas
+            FROM solicitudes
+            ${where}
+            GROUP BY dia
+            ORDER BY dia
+        `, params);
+        res.json(r.rows);
+    } catch (error) {
+        console.error('Error en /stats/por-dia:', error.message);
+        res.status(500).json({ error: 'No se pudo leer la base' });
+    }
+});
+
+// Estadisticas por mes de un año (grafico de barras del resumen anual).
+// Devuelve los 12 meses; los que no tienen actividad vienen en 0.
+app.get('/stats/por-mes', async (req, res) => {
+    const anio = parseInt(req.query.anio) || new Date().getFullYear();
+    try {
+        const r = await pool.query(`
+            SELECT to_char(m, 'YYYY-MM') AS mes,
+                   COALESCE(a.atendidas, 0)    AS atendidas,
+                   COALESCE(a.no_atendidas, 0) AS no_atendidas
+            FROM generate_series(make_date($1, 1, 1), make_date($1, 12, 1), interval '1 month') m
+            LEFT JOIN (
+                SELECT date_trunc('month', created_at) AS mm,
+                       COUNT(*) FILTER (WHERE estado = 'atendido')::int    AS atendidas,
+                       COUNT(*) FILTER (WHERE estado = 'no_atendido')::int AS no_atendidas
+                FROM solicitudes
+                WHERE extract(year FROM created_at) = $1
+                GROUP BY mm
+            ) a ON a.mm = m
+            ORDER BY m
+        `, [anio]);
+        res.json(r.rows);
+    } catch (error) {
+        console.error('Error en /stats/por-mes:', error.message);
+        res.status(500).json({ error: 'No se pudo leer la base' });
+    }
+});
+
+// Dashboard: pagina con los graficos. Misma origin que la API -> sin CORS.
+app.get('/dashboard', (req, res) => {
+    res.sendFile(path.join(__dirname, 'dashboard.html'));
 });
 
 app.listen(PORT, () => {

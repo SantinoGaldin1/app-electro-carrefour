@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Solicitudes Electro</title>
+    <style>
+        :root {
+            --azul: #003087;
+            --rojo: #ed1c24;
+            --verde: #2ecc71;
+            --gris: #f4f7f6;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Roboto, sans-serif;
+            background: var(--gris);
+            color: #222;
+            padding: 24px;
+        }
+        header {
+            display: flex; align-items: center; justify-content: space-between;
+            flex-wrap: wrap; gap: 12px; margin-bottom: 24px;
+        }
+        h1 { color: var(--azul); font-size: 1.5rem; }
+        button {
+            background: var(--azul); color: #fff; border: none;
+            padding: 10px 18px; border-radius: 8px; cursor: pointer; font-weight: 600;
+        }
+        button:hover { background: #0040b3; }
+        select {
+            padding: 10px 14px; border-radius: 8px; border: 1px solid #ccc;
+            background: #fff; font-size: 0.95rem; color: var(--azul); font-weight: 600;
+            cursor: pointer; text-transform: capitalize;
+        }
+        select:disabled { opacity: 0.45; cursor: not-allowed; }
+        .toggle { background: #fff; color: var(--azul); border: 2px solid var(--azul); }
+        .toggle:hover { background: #eaf0fb; }
+        .toggle.activo { background: var(--azul); color: #fff; }
+        .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
+        .card { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .card .label { font-size: 0.85rem; color: #777; margin-bottom: 6px; }
+        .card .num { font-size: 2.2rem; font-weight: 800; color: var(--azul); }
+        .card.ok .num { color: var(--verde); }
+        .card.no .num { color: var(--rojo); }
+        .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
+        .panel { background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .panel h2 { font-size: 1rem; color: #444; margin-bottom: 16px; }
+        #estado { color: #999; font-size: 0.85rem; margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>📊 Solicitudes de asesor — Electro</h1>
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <button id="btnResumen" class="toggle" onclick="toggleResumen()">Resumen de año</button>
+            <select id="anio" onchange="cargar()"></select>
+            <select id="mes" onchange="cargar()"></select>
+            <button onclick="cargar()">↻ Actualizar</button>
+        </div>
+    </header>
+
+    <div class="cards">
+        <div class="card"><div class="label">Total solicitudes</div><div class="num" id="total">—</div></div>
+        <div class="card ok"><div class="label">Atendidas</div><div class="num" id="atendidas">—</div></div>
+        <div class="card no"><div class="label">No atendidas</div><div class="num" id="no_atendidas">—</div></div>
+        <div class="card"><div class="label">% atención</div><div class="num" id="porcentaje">—</div></div>
+    </div>
+
+    <div class="charts">
+        <div class="panel">
+            <h2>Atendidas vs No atendidas</h2>
+            <div style="position: relative; height: 300px;">
+                <canvas id="torta"></canvas>
+            </div>
+        </div>
+        <div class="panel">
+            <h2 id="tituloBarras">Solicitudes por día</h2>
+            <canvas id="barras"></canvas>
+        </div>
+    </div>
+
+    <p id="estado"></p>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+        let torta, barras, ultimoTotal = null, resumenAnual = false;
+
+        const MESES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+                       'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+        // mes elegido en formato YYYY-MM, combinando los dos desplegables.
+        function mesSeleccionado() {
+            return document.getElementById('anio').value + '-' + document.getElementById('mes').value;
+        }
+
+        async function initSelectores() {
+            const selA = document.getElementById('anio');
+            const selM = document.getElementById('mes');
+            const anios = await fetch('/stats/anios').then(r => r.json());
+            selA.innerHTML = anios.map(a => `<option value="${a}">${a}</option>`).join('');
+            // meses: Enero arriba (01) -> Diciembre abajo (12)
+            selM.innerHTML = MESES.map((nombre, i) =>
+                `<option value="${String(i + 1).padStart(2, '0')}">${nombre}</option>`).join('');
+            // por defecto: año y mes actuales
+            const hoy = new Date();
+            if (anios.includes(hoy.getFullYear())) selA.value = hoy.getFullYear();
+            selM.value = String(hoy.getMonth() + 1).padStart(2, '0');
+        }
+
+        function actualizarCards(s) {
+            document.getElementById('total').textContent = s.total;
+            document.getElementById('atendidas').textContent = s.atendidas;
+            document.getElementById('no_atendidas').textContent = s.no_atendidas;
+            document.getElementById('porcentaje').textContent =
+                s.total ? Math.round(s.atendidas / s.total * 100) + '%' : '—';
+        }
+
+        // Toggle On/Off: alterna entre resumen anual y la vista del mes.
+        function toggleResumen() {
+            resumenAnual = !resumenAnual;
+            document.getElementById('btnResumen').classList.toggle('activo', resumenAnual);
+            document.getElementById('mes').disabled = resumenAnual; // el mes no aplica en resumen anual
+            cargar();
+        }
+
+        async function cargar() {
+            const estado = document.getElementById('estado');
+            const anio = document.getElementById('anio').value;
+            estado.textContent = 'Cargando...';
+            try {
+                if (resumenAnual) {
+                    const [s, meses] = await Promise.all([
+                        fetch('/stats?anio=' + anio).then(r => r.json()),
+                        fetch('/stats/por-mes?anio=' + anio).then(r => r.json())
+                    ]);
+                    actualizarCards(s);
+                    dibujarTorta(s);
+                    document.getElementById('tituloBarras').textContent = 'Solicitudes por mes — ' + anio;
+                    dibujarBarras(
+                        meses.map(m => MESES[parseInt(m.mes.split('-')[1]) - 1].slice(0, 3)),
+                        meses.map(m => m.atendidas), meses.map(m => m.no_atendidas)
+                    );
+                    ultimoTotal = s.total;
+                } else {
+                    const q = '?mes=' + mesSeleccionado();
+                    const [s, dias] = await Promise.all([
+                        fetch('/stats' + q).then(r => r.json()),
+                        fetch('/stats/por-dia' + q).then(r => r.json())
+                    ]);
+                    actualizarCards(s);
+                    dibujarTorta(s);
+                    document.getElementById('tituloBarras').textContent = 'Solicitudes por día';
+                    const fmt = d => new Date(d).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' });
+                    dibujarBarras(
+                        dias.map(d => fmt(d.dia)),
+                        dias.map(d => d.atendidas), dias.map(d => d.no_atendidas)
+                    );
+                    ultimoTotal = s.total;
+                }
+                estado.textContent = 'Actualizado ' + new Date().toLocaleString('es-AR');
+            } catch (e) {
+                estado.textContent = 'Error cargando datos. ¿El servidor está activo?';
+            }
+        }
+
+        // Chequeo liviano cada 20s: solo redibuja si entró una solicitud nueva en lo que se ve.
+        async function verificar() {
+            try {
+                const q = resumenAnual
+                    ? '?anio=' + document.getElementById('anio').value
+                    : '?mes=' + mesSeleccionado();
+                const s = await fetch('/stats' + q).then(r => r.json());
+                if (s.total !== ultimoTotal) cargar();
+            } catch (e) { /* ignora; reintenta en el proximo tick */ }
+        }
+
+        function dibujarTorta(s) {
+            const ctx = document.getElementById('torta');
+            if (torta) torta.destroy();
+            torta = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Atendidas', 'No atendidas'],
+                    datasets: [{ data: [s.atendidas, s.no_atendidas], backgroundColor: ['#2ecc71', '#ed1c24'] }]
+                },
+                options: { responsive: true, maintainAspectRatio: false, layout: { padding: 4 }, plugins: { legend: { position: 'bottom' } } }
+            });
+        }
+
+        function dibujarBarras(labels, atendidas, noAtendidas) {
+            const ctx = document.getElementById('barras');
+            if (barras) barras.destroy();
+            barras = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        { label: 'Atendidas', data: atendidas, backgroundColor: '#2ecc71' },
+                        { label: 'No atendidas', data: noAtendidas, backgroundColor: '#ed1c24' }
+                    ]
+                },
+                options: {
+                    plugins: { legend: { position: 'bottom' } },
+                    scales: { x: { stacked: true }, y: { stacked: true, ticks: { precision: 0 } } }
+                }
+            });
+        }
+
+        (async () => {
+            await initSelectores();
+            await cargar();
+            setInterval(verificar, 20000); // chequea cada 20s, solo redibuja si hay datos nuevos
+        })();
+    </script>
+</body>
+</html>
