@@ -1,0 +1,8 @@
+.aider*
+
+# Secrets - nunca commitear
+.env
+backend/.env
+
+# Dependencias
+node_modules/
