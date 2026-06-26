@@ -15,7 +15,8 @@ app.get('/ping', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+const CHAT_ID = process.env.TELEGRAM_CHAT_ID;         // grupo (notificaciones)
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || CHAT_ID; // chat privado (panel)
 const COOLDOWN_MS = (parseInt(process.env.COOLDOWN_SEGUNDOS) || 15) * 1000;
 
 // Llamada a la API de Telegram (sendMessage, editMessageText, answerCallbackQuery, etc.)
@@ -28,7 +29,6 @@ const pool = new Pool({
     ssl: { rejectUnauthorized: false }
 });
 
-// Crea la tabla si no existe. Una fila por cada boton tocado.
 async function initDb() {
     await pool.query(`
         CREATE TABLE IF NOT EXISTS solicitudes (
@@ -37,17 +37,117 @@ async function initDb() {
             created_at TIMESTAMP NOT NULL DEFAULT date_trunc('minute', now() AT TIME ZONE 'America/Argentina/Buenos_Aires')
         )
     `);
-    // RLS on: bloquea la REST API publica de Supabase. El backend usa conexion directa
-    // (rol postgres) que igual la bypassea, asi que no afecta el funcionamiento. Idempotente.
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS config (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+    `);
     await pool.query('ALTER TABLE solicitudes ENABLE ROW LEVEL SECURITY');
-    console.log('DB lista (tabla solicitudes)');
+    console.log('DB lista');
+}
+
+async function getConfig(key) {
+    const r = await pool.query('SELECT value FROM config WHERE key = $1', [key]);
+    return r.rows[0]?.value ?? null;
+}
+
+async function setConfig(key, value) {
+    await pool.query(
+        'INSERT INTO config (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = $2',
+        [key, value]
+    );
 }
 
 // ponytail: timestamp en RAM, una sola instancia en Render. Se resetea al reiniciar
 // (no pasa nada, el cooldown es efímero). Cuando exista ruteo por pasillo -> Map por pasillo.
 let ultimaSolicitud = 0;
 
+function minutosAR() {
+    const ar = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    return ar.getHours() * 60 + ar.getMinutes();
+}
+
+// Opción 2: el interruptor manual manda; el cron solo lo flip en los bordes del horario.
+// En RAM: se resetea al reiniciar → init según hora actual.
+let servidorAbierto = minutosAR() >= 8 * 60 && minutosAR() < 21 * 60 + 30;
+
+// --- Panel de control (mensaje fijado en chat privado) ---
+
+function textoPanel() {
+    const estado = servidorAbierto ? '🟢 *Abierto*' : '🔴 *Cerrado*';
+    const ar = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
+    const hora = ar.toTimeString().slice(0, 5);
+    return `🏪 *Panel Electro*\n\nEstado: ${estado}\nHorario: 08:00 – 21:30\nÚltima actualización: ${hora} hs`;
+}
+
+function tecladoPanel() {
+    return {
+        inline_keyboard: [[
+            { text: '🟢 Abrir', callback_data: 'cmd_abrir' },
+            { text: '🔴 Cerrar', callback_data: 'cmd_cerrar' }
+        ]]
+    };
+}
+
+async function actualizarPanel() {
+    try {
+        const msgId = await getConfig('pinned_msg_id');
+        if (!msgId) return;
+        await tg('editMessageText', {
+            chat_id: ADMIN_CHAT_ID,
+            message_id: parseInt(msgId),
+            text: textoPanel(),
+            parse_mode: 'Markdown',
+            reply_markup: tecladoPanel()
+        });
+    } catch (e) {
+        // Si el mensaje fue borrado, limpiar para que iniciarPanel lo recree
+        if (e.response?.data?.description?.includes('message to edit not found')) {
+            await setConfig('pinned_msg_id', '').catch(() => {});
+        }
+    }
+}
+
+async function iniciarPanel() {
+    try {
+        const msgId = await getConfig('pinned_msg_id');
+        if (msgId) {
+            await actualizarPanel();
+        } else {
+            const r = await tg('sendMessage', {
+                chat_id: ADMIN_CHAT_ID,
+                text: textoPanel(),
+                parse_mode: 'Markdown',
+                reply_markup: tecladoPanel()
+            });
+            const id = r.data.result.message_id;
+            await tg('pinChatMessage', { chat_id: ADMIN_CHAT_ID, message_id: id, disable_notification: true });
+            await setConfig('pinned_msg_id', id.toString());
+        }
+        console.log('[panel] Panel de control listo');
+    } catch (e) {
+        console.error('[panel] Error iniciando panel:', e.response?.data || e.message);
+    }
+}
+
+// Cron: flip automático en bordes de horario + actualiza panel
+setInterval(async () => {
+    const min = minutosAR();
+    if (min === 8 * 60)       { servidorAbierto = true;  console.log('[horario] Apertura automática 08:00'); await actualizarPanel(); }
+    if (min === 21 * 60 + 30) { servidorAbierto = false; console.log('[horario] Cierre automático 21:30');  await actualizarPanel(); }
+}, 60000);
+
+// --- Rutas ---
+
+app.get('/estado', (req, res) => {
+    res.json({ abierto: servidorAbierto, horario: { desde: '08:00', hasta: '21:30' } });
+});
+
 app.post('/solicitar', async (req, res) => {
+    if (!servidorAbierto) {
+        return res.status(503).send({ success: false, message: 'Fuera de horario de atención (08:00 – 21:30).' });
+    }
     const ahora = Date.now();
     const restanteMs = COOLDOWN_MS - (ahora - ultimaSolicitud);
     if (restanteMs > 0) {
@@ -73,7 +173,7 @@ app.post('/solicitar', async (req, res) => {
             }
         });
 
-        ultimaSolicitud = Date.now(); // solo arranca el cooldown si el aviso salió OK
+        ultimaSolicitud = Date.now();
         res.status(200).send({ success: true, message: 'Notificación enviada' });
     } catch (error) {
         console.error('Error enviando mensaje a Telegram:', error.response?.data || error.message);
@@ -84,11 +184,18 @@ app.post('/solicitar', async (req, res) => {
 // Procesa un toque de boton: edita el mensaje, saca los botones y registra en la DB.
 // Lo usan tanto el webhook (produccion) como el polling (desarrollo local).
 async function procesarCallback(cb) {
+    // Botones del panel de control
+    if (cb.data === 'cmd_abrir' || cb.data === 'cmd_cerrar') {
+        servidorAbierto = cb.data === 'cmd_abrir';
+        await actualizarPanel();
+        tg('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
+        return;
+    }
+
     const estado = cb.data === 'atendido' ? 'atendido' : 'no_atendido';
     const etiqueta = estado === 'atendido' ? '✅ Solicitud atendida' : '❌ Solicitud no atendida';
     const msg = cb.message;
 
-    // Edita el mensaje y saca los botones (no se puede volver a tocar -> no hay doble conteo)
     try {
         await tg('editMessageText', {
             chat_id: msg.chat.id,
@@ -99,7 +206,6 @@ async function procesarCallback(cb) {
         console.error('Error editando mensaje:', error.response?.data || error.message);
     }
 
-    // Registra el evento en la base (en su propio try: si Telegram falla, el dato igual se guarda)
     try {
         await pool.query('INSERT INTO solicitudes (estado) VALUES ($1)', [estado]);
         console.log(`[seguimiento] estado=${estado} guardado en DB`);
@@ -107,14 +213,13 @@ async function procesarCallback(cb) {
         console.error('Error guardando en DB:', error.message);
     }
 
-    // Frena el "relojito" del boton. Cosmetico y best-effort: si falla, no afecta el registro.
     tg('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
 }
 
 // Webhook: Telegram lo llama cuando alguien toca un boton (modo produccion).
 app.post('/webhook', (req, res) => {
     res.sendStatus(200); // responder rapido; Telegram reintenta si tarda
-    if (req.body.callback_query) procesarCallback(req.body.callback_query);
+    if (req.body.callback_query) procesarCallback(req.body.callback_query).catch(() => {});
 });
 
 // Polling (modo desarrollo local): el server le pregunta a Telegram por los toques.
@@ -231,7 +336,9 @@ app.get('/dashboard', (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
-    initDb().catch(e => console.error('Error inicializando DB:', e.message));
+    initDb()
+        .then(() => iniciarPanel())
+        .catch(e => console.error('Error inicializando:', e.message));
     if (process.env.USE_POLLING === 'true') {
         iniciarPolling().catch(e => console.error('Error en polling:', e.message));
     }
