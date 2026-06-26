@@ -198,6 +198,33 @@
     </div>
 
     <script>
+        const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+            ? 'http://localhost:3000'
+            : 'https://carrefour-bot.onrender.com';
+
+        async function verificarEstado() {
+            try {
+                const r = await fetch(`${API}/estado`);
+                const data = await r.json();
+                const btn = document.getElementById('requestBtn');
+                const status = document.getElementById('status');
+                if (!data.abierto) {
+                    btn.disabled = true;
+                    status.innerText = `⏰ Fuera de horario de atención (${data.horario.desde} – ${data.horario.hasta}).`;
+                    status.className = 'info show';
+                } else {
+                    // Solo rehabilita si estaba cerrado (no interrumpe cooldown activo)
+                    if (status.innerText.startsWith('⏰')) {
+                        btn.disabled = false;
+                        status.classList.remove('show');
+                    }
+                }
+            } catch (e) { /* si falla la red, no toca nada */ }
+        }
+
+        verificarEstado();
+        setInterval(verificarEstado, 60000);
+
         // Campanita sintetizada (Web Audio): dos notas tipo "ding-dong", sin archivo.
         function sonarCampana() {
             try {
@@ -231,11 +258,6 @@
             loader.style.display = 'block';
             status.innerText = "";
             status.classList.remove('show');
-
-            // ponytail: local apunta al backend de tu maquina, en vivo a Render. Sin toggle manual.
-            const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
-                ? 'http://localhost:3000'
-                : 'https://carrefour-bot.onrender.com';
 
             try {
                 const response = await fetch(`${API}/solicitar`, {
