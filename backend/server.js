@@ -150,7 +150,9 @@ setInterval(async () => {
 
 // --- Rutas ---
 
-app.get('/estado', (req, res) => {
+app.get('/estado', async (req, res) => {
+    const saved = await getConfig('servidor_abierto').catch(() => null);
+    if (saved !== null) servidorAbierto = saved === '1';
     res.json({ abierto: servidorAbierto, horario: { desde: '08:00', hasta: '21:30' } });
 });
 
