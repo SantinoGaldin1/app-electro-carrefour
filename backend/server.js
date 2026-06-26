@@ -44,6 +44,11 @@ async function initDb() {
         )
     `);
     await pool.query('ALTER TABLE solicitudes ENABLE ROW LEVEL SECURITY');
+    // Leer estado persistido; si no existe, inicializar según horario
+    const saved = await getConfig('servidor_abierto');
+    if (saved !== null) {
+        servidorAbierto = saved === '1';
+    }
     console.log('DB lista');
 }
 
@@ -69,8 +74,13 @@ function minutosAR() {
 }
 
 // Opción 2: el interruptor manual manda; el cron solo lo flip en los bordes del horario.
-// En RAM: se resetea al reiniciar → init según hora actual.
+// Persiste en DB para sobrevivir reinicios y múltiples procesos.
 let servidorAbierto = minutosAR() >= 8 * 60 && minutosAR() < 21 * 60 + 30;
+
+async function setAbierto(valor) {
+    servidorAbierto = valor;
+    await setConfig('servidor_abierto', valor ? '1' : '0');
+}
 
 // --- Panel de control (mensaje fijado en chat privado) ---
 
@@ -134,8 +144,8 @@ async function iniciarPanel() {
 // Cron: flip automático en bordes de horario + actualiza panel
 setInterval(async () => {
     const min = minutosAR();
-    if (min === 8 * 60)       { servidorAbierto = true;  console.log('[horario] Apertura automática 08:00'); await actualizarPanel(); }
-    if (min === 21 * 60 + 30) { servidorAbierto = false; console.log('[horario] Cierre automático 21:30');  await actualizarPanel(); }
+    if (min === 8 * 60)       { await setAbierto(true);  console.log('[horario] Apertura automática 08:00'); await actualizarPanel(); }
+    if (min === 21 * 60 + 30) { await setAbierto(false); console.log('[horario] Cierre automático 21:30');  await actualizarPanel(); }
 }, 60000);
 
 // --- Rutas ---
@@ -186,7 +196,7 @@ app.post('/solicitar', async (req, res) => {
 async function procesarCallback(cb) {
     // Botones del panel de control
     if (cb.data === 'cmd_abrir' || cb.data === 'cmd_cerrar') {
-        servidorAbierto = cb.data === 'cmd_abrir';
+        await setAbierto(cb.data === 'cmd_abrir');
         await actualizarPanel();
         tg('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
         return;
