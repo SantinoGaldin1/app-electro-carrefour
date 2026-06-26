@@ -38,6 +38,7 @@ Dashboard  (servido por el backend)
 
 - **Frontend** y **backend** están desacoplados: la web es estática y la API corre aparte.
 - El backend recibe los toques de los botones de Telegram mediante un **webhook**.
+- Un **cron-job** le hace un ping periódico al backend para mantenerlo despierto: el plan gratuito de Render "duerme" el servicio tras un tiempo de inactividad, y el ping evita la demora del primer arranque (cold start), así el webhook y las solicitudes responden al instante.
 
 ## Tecnologías
 
