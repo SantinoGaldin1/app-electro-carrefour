@@ -1,39 +1,63 @@
-# Aplicación Solicitar Asesor - Carrefour Electro
+# Solicitar Asesor — Carrefour Electro
 
-Esta aplicación permite a los clientes solicitar asistencia escaneando un código QR. La notificación llega a un grupo de Telegram donde están los 4 asesores.
+Aplicación web para que un cliente del sector de Electrodomésticos pueda **llamar a un asesor con un solo botón**. La solicitud llega al instante a un grupo de Telegram donde están los asesores, que pueden marcarla como atendida o no atendida desde el mismo mensaje. Todo el seguimiento queda registrado y se visualiza en un dashboard.
 
-## 1. Configuración de Telegram (Para todo el equipo)
+## El problema que resuelve
 
-1. **Crear el Bot:**
-   - Busca a `@BotFather` en Telegram y crea un bot con `/newbot`. Guarda el **API Token**.
-2. **Crear el Grupo:**
-   - Crea un grupo de Telegram e invita a tus 3 compañeros.
-   - **IMPORTANTE:** Agrega al Bot que creaste como miembro del grupo.
-3. **Obtener el Group Chat ID:**
-   - Agrega al bot `@raw_data_bot` al grupo.
-   - Apenas entre, enviará un mensaje con mucha información técnica. Busca la sección `"chat": { "id": -100XXXXXXXXXX }`. Ese número negativo es el **Chat ID del grupo**.
-   - (Luego puedes sacar a `@raw_data_bot`).
+En el sector de Electro los asesores no siempre están cerca del punto de venta (están reponiendo, ayudando en otro pasillo, etc.). El cliente que necesita ayuda no tiene forma de avisar. Esta app le da un botón: lo toca y un asesor recibe el aviso en su celular, sin importar dónde esté en el local.
 
-## 2. Despliegue en Render (Gratis y 24/7)
+## Cómo funciona
 
-Para que funcione con 4G/5G, subiremos el backend a **Render.com**:
+1. El cliente abre la página (por ejemplo desde un QR en el sector) y toca **Solicitar**.
+2. El backend recibe el pedido y envía un mensaje al **grupo de Telegram** de los asesores, con dos botones: **✅ Atendido** y **❌ No atendido**.
+3. Un asesor toca uno de los botones. El mensaje se actualiza ("Solicitud atendida" / "no atendida") y los botones desaparecen, así no se cuenta dos veces.
+4. Cada resultado se guarda en una base de datos.
+5. El **dashboard** muestra las estadísticas: cuántas solicitudes hubo, cuántas se atendieron y cuántas no, por día, por mes o como resumen anual.
 
-1. Sube tu código a un repositorio de **GitHub**.
-2. Crea una cuenta en [Render.com](https://render.com/).
-3. Haz clic en **New +** > **Web Service**.
-4. Conecta tu repo de GitHub.
-5. En la configuración:
-   - **Runtime:** `Node`
-   - **Build Command:** `npm install` (asegúrate de que sea en la carpeta backend)
-   - **Start Command:** `node server.js`
-6. Ve a la pestaña **Environment** y agrega:
-   - `TELEGRAM_BOT_TOKEN`: (Tu token)
-   - `TELEGRAM_CHAT_ID`: (Tu ID de grupo negativo)
-7. Render te dará una URL (ej: `https://app-electro.onrender.com`).
+Incluye un **cooldown** para que tocar el botón muchas veces seguidas no genere un spam de notificaciones.
 
-## 3. Actualizar el Frontend
+## Dashboard
 
-Una vez tengas la URL de Render:
-1. Abre `frontend/index.html`.
-2. Cambia `http://localhost:3000/solicitar` por `https://tu-url-de-render.onrender.com/solicitar`.
-3. ¡Listo! Ya puedes generar el QR con esa URL (o subir el HTML a GitHub Pages/Vercel si quieres que la web también esté en la nube).
+Página de estadísticas con gráficos (torta de atendidas/no atendidas y barras por día o por mes), filtros por año y mes, un modo "Resumen de año" y auto-actualización cuando entra una solicitud nueva.
+
+## Arquitectura
+
+```
+Cliente (navegador)
+      │  toca "Solicitar"
+      ▼
+Frontend  ── GitHub Pages
+      │  HTTP
+      ▼
+Backend (API)  ── Render
+      │           ├─► Telegram Bot API  (mensaje + botones)
+      │           └─► PostgreSQL ── Supabase  (registro de cada solicitud)
+      ▼
+Dashboard  (servido por el backend)
+```
+
+- **Frontend** y **backend** están desacoplados: la web es estática y la API corre aparte.
+- El backend recibe los toques de los botones de Telegram mediante un **webhook**.
+
+## Tecnologías
+
+| Capa | Herramienta |
+|------|-------------|
+| Frontend | [Vite](https://vite.dev/) + HTML/CSS/JS, alojado en [GitHub Pages](https://pages.github.com/) |
+| Backend | [Node.js](https://nodejs.org/) + [Express](https://expressjs.com/) en [Render](https://render.com/) |
+| Mensajería | [Telegram Bot API](https://core.telegram.org/bots/api) |
+| Base de datos | [PostgreSQL](https://www.postgresql.org/) en [Supabase](https://supabase.com/) |
+| Gráficos | [Chart.js](https://www.chartjs.org/) |
+| CI/CD | [GitHub Actions](https://github.com/features/actions) (build + deploy automático) |
+
+## Estructura del repositorio
+
+```
+frontend/   Página del cliente (Vite). Se publica en GitHub Pages.
+backend/    API en Express: envío a Telegram, webhook, base de datos y dashboard.
+.github/    Workflows de CI y de deploy a Pages.
+```
+
+## Estado
+
+Aplicación en uso real en el sector de Electrodomésticos. Mejoras posibles a futuro: ruteo de solicitudes por pasillo y protección de acceso al dashboard.
