@@ -87,7 +87,9 @@ async function setAbierto(valor) {
 function textoPanel() {
     const estado = servidorAbierto ? '🟢 *Abierto*' : '🔴 *Cerrado*';
     const ar = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Argentina/Buenos_Aires' }));
-    const hora = ar.toTimeString().slice(0, 5);
+    // HH:MM:SS: con segundos, dos toques seguidos nunca generan el mismo texto
+    // (si fuera idéntico, Telegram responde "message is not modified" y parece que no pasó nada).
+    const hora = ar.toTimeString().slice(0, 8);
     return `🏪 *Panel Electro*\n\nEstado: ${estado}\nHorario: 08:00 – 21:30\nÚltima actualización: ${hora} hs`;
 }
 
@@ -100,17 +102,22 @@ function tecladoPanel() {
     };
 }
 
-async function actualizarPanel() {
+// Edita el panel. Sin argumentos usa el mensaje rastreado (pinned_msg_id), pero
+// se le puede pasar un chat/mensaje puntual: lo usamos para editar el mensaje que
+// el usuario REALMENTE tocó, que puede no coincidir con pinned_msg_id si quedaron
+// paneles duplicados (ahí estaba el bug: Telegram editaba OK otro mensaje invisible).
+async function actualizarPanel(targetChatId, targetMsgId) {
     try {
-        const msgId = await getConfig('pinned_msg_id');
+        const chatId = targetChatId ?? ADMIN_CHAT_ID;
+        const msgId = targetMsgId ?? await getConfig('pinned_msg_id');
         if (!msgId) {
             console.log('[panel] Sin pinned_msg_id — recreando panel');
             await iniciarPanel();
             return;
         }
-        console.log(`[panel] editando msg ${msgId} en chat ${ADMIN_CHAT_ID}`);
+        console.log(`[panel] editando msg ${msgId} en chat ${chatId}`);
         await tg('editMessageText', {
-            chat_id: ADMIN_CHAT_ID,
+            chat_id: chatId,
             message_id: parseInt(msgId),
             text: textoPanel(),
             parse_mode: 'Markdown',
@@ -213,7 +220,14 @@ async function procesarCallback(cb) {
         tg('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
         await setAbierto(cb.data === 'cmd_abrir');
         console.log(`[panel] ${cb.data} → servidorAbierto=${servidorAbierto}`);
-        await actualizarPanel();
+        // Editar el mensaje que el usuario tocó (no el de pinned_msg_id, que puede
+        // apuntar a un panel duplicado/invisible) y re-sincronizar el rastreado.
+        if (cb.message) {
+            await actualizarPanel(cb.message.chat.id, cb.message.message_id);
+            await setConfig('pinned_msg_id', cb.message.message_id.toString()).catch(() => {});
+        } else {
+            await actualizarPanel();
+        }
         return;
     }
 
@@ -241,10 +255,22 @@ async function procesarCallback(cb) {
     tg('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
 }
 
+// Procesa mensajes de texto. Solo /panel y /start desde el chat admin: fuerzan la
+// recreación del panel (útil si se borró el mensaje fijado y quedó sin panel).
+async function procesarMensaje(msg) {
+    const texto = (msg.text || '').trim();
+    if (texto !== '/panel' && texto !== '/start') return;
+    if (String(msg.chat.id) !== String(ADMIN_CHAT_ID)) return;
+    console.log(`[panel] ${texto} → recreando panel a pedido`);
+    await setConfig('pinned_msg_id', '').catch(() => {}); // descartar el rastreado (puede estar borrado)
+    await iniciarPanel();
+}
+
 // Webhook: Telegram lo llama cuando alguien toca un boton (modo produccion).
 app.post('/webhook', (req, res) => {
     res.sendStatus(200); // responder rapido; Telegram reintenta si tarda
     if (req.body.callback_query) procesarCallback(req.body.callback_query).catch(() => {});
+    else if (req.body.message) procesarMensaje(req.body.message).catch(() => {});
 });
 
 // Polling (modo desarrollo local): el server le pregunta a Telegram por los toques.
@@ -259,6 +285,7 @@ async function iniciarPolling() {
             for (const u of data.result) {
                 offset = u.update_id + 1;
                 if (u.callback_query) await procesarCallback(u.callback_query);
+                else if (u.message) await procesarMensaje(u.message);
             }
         } catch (error) {
             await new Promise(r => setTimeout(r, 2000)); // backoff y reintenta
