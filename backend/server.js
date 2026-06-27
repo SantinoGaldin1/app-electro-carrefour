@@ -112,9 +112,12 @@ async function actualizarPanel() {
             reply_markup: tecladoPanel()
         });
     } catch (e) {
-        // Si el mensaje fue borrado, limpiar para que iniciarPanel lo recree
-        if (e.response?.data?.description?.includes('message to edit not found')) {
+        const desc = e.response?.data?.description || e.message;
+        console.error('[panel] Error actualizando:', desc);
+        // Si el mensaje no existe o el chat cambió, limpiar para que iniciarPanel lo recree
+        if (desc.includes('not found') || desc.includes('chat not found') || desc.includes('CHAT_NOT_FOUND')) {
             await setConfig('pinned_msg_id', '').catch(() => {});
+            await iniciarPanel().catch(() => {});
         }
     }
 }
@@ -348,10 +351,15 @@ app.get('/dashboard', (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
+    if (process.env.USE_POLLING === 'true') {
+        iniciarPolling().catch(e => console.error('Error en polling:', e.message));
+    } else {
+        const webhookUrl = `https://carrefour-bot.onrender.com/webhook`;
+        tg('setWebhook', { url: webhookUrl, allowed_updates: ['callback_query', 'message'] })
+            .then(() => console.log('[webhook] Registrado:', webhookUrl))
+            .catch(e => console.error('[webhook] Error al registrar:', e.message));
+    }
     initDb()
         .then(() => iniciarPanel())
         .catch(e => console.error('Error inicializando:', e.message));
-    if (process.env.USE_POLLING === 'true') {
-        iniciarPolling().catch(e => console.error('Error en polling:', e.message));
-    }
 });
