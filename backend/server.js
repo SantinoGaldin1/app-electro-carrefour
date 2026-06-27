@@ -198,9 +198,9 @@ app.post('/solicitar', async (req, res) => {
 async function procesarCallback(cb) {
     // Botones del panel de control
     if (cb.data === 'cmd_abrir' || cb.data === 'cmd_cerrar') {
+        tg('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
         await setAbierto(cb.data === 'cmd_abrir');
         await actualizarPanel();
-        tg('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
         return;
     }
 
