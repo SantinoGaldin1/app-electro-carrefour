@@ -103,7 +103,11 @@ function tecladoPanel() {
 async function actualizarPanel() {
     try {
         const msgId = await getConfig('pinned_msg_id');
-        if (!msgId) return;
+        if (!msgId) {
+            console.log('[panel] Sin pinned_msg_id — recreando panel');
+            await iniciarPanel();
+            return;
+        }
         console.log(`[panel] editando msg ${msgId} en chat ${ADMIN_CHAT_ID}`);
         await tg('editMessageText', {
             chat_id: ADMIN_CHAT_ID,
@@ -115,6 +119,7 @@ async function actualizarPanel() {
         console.log('[panel] mensaje actualizado OK');
     } catch (e) {
         const desc = e.response?.data?.description || e.message;
+        if (desc.includes('message is not modified')) return; // ya estaba en ese estado, OK
         console.error('[panel] Error actualizando:', desc);
         // Si el mensaje no existe o el chat cambió, limpiar para que iniciarPanel lo recree
         if (desc.includes('not found') || desc.includes('chat not found') || desc.includes('CHAT_NOT_FOUND')) {
@@ -127,6 +132,7 @@ async function actualizarPanel() {
 async function iniciarPanel() {
     try {
         const msgId = await getConfig('pinned_msg_id');
+        console.log(`[panel] iniciarPanel msgId=${msgId} ADMIN_CHAT_ID=${ADMIN_CHAT_ID}`);
         if (msgId) {
             await actualizarPanel();
         } else {
@@ -137,8 +143,9 @@ async function iniciarPanel() {
                 reply_markup: tecladoPanel()
             });
             const id = r.data.result.message_id;
-            await tg('pinChatMessage', { chat_id: ADMIN_CHAT_ID, message_id: id, disable_notification: true });
+            await tg('pinChatMessage', { chat_id: ADMIN_CHAT_ID, message_id: id, disable_notification: true }).catch(e => console.error('[panel] pin falló:', e.response?.data?.description));
             await setConfig('pinned_msg_id', id.toString());
+            console.log(`[panel] Panel creado msgId=${id}`);
         }
         console.log('[panel] Panel de control listo');
     } catch (e) {
