@@ -112,9 +112,12 @@ async function actualizarPanel() {
             reply_markup: tecladoPanel()
         });
     } catch (e) {
-        // Si el mensaje fue borrado, limpiar para que iniciarPanel lo recree
-        if (e.response?.data?.description?.includes('message to edit not found')) {
+        const desc = e.response?.data?.description || e.message;
+        console.error('[panel] Error actualizando:', desc);
+        // Si el mensaje no existe o el chat cambió, limpiar para que iniciarPanel lo recree
+        if (desc.includes('not found') || desc.includes('chat not found') || desc.includes('CHAT_NOT_FOUND')) {
             await setConfig('pinned_msg_id', '').catch(() => {});
+            await iniciarPanel().catch(() => {});
         }
     }
 }
