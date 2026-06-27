@@ -104,6 +104,7 @@ async function actualizarPanel() {
     try {
         const msgId = await getConfig('pinned_msg_id');
         if (!msgId) return;
+        console.log(`[panel] editando msg ${msgId} en chat ${ADMIN_CHAT_ID}`);
         await tg('editMessageText', {
             chat_id: ADMIN_CHAT_ID,
             message_id: parseInt(msgId),
@@ -111,6 +112,7 @@ async function actualizarPanel() {
             parse_mode: 'Markdown',
             reply_markup: tecladoPanel()
         });
+        console.log('[panel] mensaje actualizado OK');
     } catch (e) {
         const desc = e.response?.data?.description || e.message;
         console.error('[panel] Error actualizando:', desc);
@@ -203,6 +205,7 @@ async function procesarCallback(cb) {
     if (cb.data === 'cmd_abrir' || cb.data === 'cmd_cerrar') {
         tg('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
         await setAbierto(cb.data === 'cmd_abrir');
+        console.log(`[panel] ${cb.data} → servidorAbierto=${servidorAbierto}`);
         await actualizarPanel();
         return;
     }
