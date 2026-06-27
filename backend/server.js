@@ -348,10 +348,15 @@ app.get('/dashboard', (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`Servidor corriendo en http://localhost:${PORT}`);
+    if (process.env.USE_POLLING === 'true') {
+        iniciarPolling().catch(e => console.error('Error en polling:', e.message));
+    } else {
+        const webhookUrl = `https://carrefour-bot.onrender.com/webhook`;
+        tg('setWebhook', { url: webhookUrl, allowed_updates: ['callback_query', 'message'] })
+            .then(() => console.log('[webhook] Registrado:', webhookUrl))
+            .catch(e => console.error('[webhook] Error al registrar:', e.message));
+    }
     initDb()
         .then(() => iniciarPanel())
         .catch(e => console.error('Error inicializando:', e.message));
-    if (process.env.USE_POLLING === 'true') {
-        iniciarPolling().catch(e => console.error('Error en polling:', e.message));
-    }
 });
